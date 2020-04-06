@@ -7,7 +7,7 @@
     </head>
     <body>
         <div id="app">
-            <h2>{{person.name}} -- {{person.age}}</h2>
+            <h2>{{person.test.try}} -- {{person.age}}</h2>
             <h2>{{person.fav}}</h2>
             <ul>
                 <li>1</li>
@@ -23,7 +23,7 @@
 
             <button @click="handleClick">button</button>
 
-            <input type="text" v-model="person.name">
+            <input type="text" v-model="person.test.try">
 
         </div>
     </body>
@@ -46,7 +46,7 @@
             },
             methods: {
                 handleClick(){
-                    console.log(this);
+                    this.msg="我被按下了"
                 }
             },
         })

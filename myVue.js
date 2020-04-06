@@ -5,24 +5,57 @@ const compileType = {
         }, vm.$data)
         return result
     },
+    setVal(content, vm, inputVal) {
+        const array = content.split('.')
+        let length = array.length
+        array.reduce((data, currentVal) => {
+            length--
+            if (length === 0) {
+                data[currentVal] = inputVal
+            }
+            return data[currentVal]
+        }, vm.$data)
+    },
     text(node, content, vm) {
         let value
         if (/\{\{(.+?)\}\}/.test(content)) {
             value = content.replace(/\{\{(.+?)\}\}/g, (...args) => {
+                new Watcher(vm, args[1], (newVal) => {
+                    this.updater.textUpdater(node, this.getContentVal(content, vm))
+                })
                 return this.getValue(args[1], vm)
             })
+
         }
         else {
             value = this.getValue(content, vm)
         }
         this.updater.textUpdater(node, value)
     },
+    getContentVal(content, vm) {
+        return content.replace(/\{\{(.+?)\}\}/g, (...args) => {
+
+            return this.getValue(args[1], vm)
+        })
+    },
     html(node, content, vm) {
         const value = this.getValue(content, vm)
+        new Watcher(vm, content, (newVal) => {
+            this.updater.htmlUpdater(node, newVal)
+        })
         this.updater.htmlUpdater(node, value)
     },
     model(node, content, vm) {
         const value = this.getValue(content, vm)
+        //绑定更新函数 数据驱动视图
+        new Watcher(vm, content, (newVal) => {
+            this.updater.modelUpdater(node, newVal)
+        })
+        //视图影响数据 再由数据驱动视图
+        node.addEventListener('input', e => {
+            console.log('123')
+            this.setVal(content, vm, e.target.value)
+        })
         this.updater.modelUpdater(node, value)
     },
     on(node, content, vm, eventName) {
@@ -31,8 +64,9 @@ const compileType = {
     },
     bind(node, content, vm, eventName) {
         const value = this.getValue(content, vm)
-        console.log(eventName);
-
+        new Watcher(vm, content, (newVal) => {
+            node.setAttribute(eventName, newVal)
+        })
         node.setAttribute(eventName, value)
 
     },
@@ -52,7 +86,6 @@ const compileType = {
 class Compile {
     constructor(el, vm) {
         this.el = this.isElemengtNode(el) ? el : document.querySelector(el)
-        console.log(this.el)
         this.vm = vm
         //1 获取文档碎片对象 并放入内存之中 可以减少页面的重排和重绘
         const fragment = this.node2Fragment(this.el)
@@ -90,8 +123,6 @@ class Compile {
         attributes = [...attributes]
         attributes.forEach(attr => {
             const { name, value } = attr
-            console.log(name)
-            console.log(value)
             if (this.isDirective(name)) {
                 const directive = name.split('-')[1] //text html model on:click
                 const [dirName, eventName] = directive.split(':') //click
@@ -104,7 +135,6 @@ class Compile {
 
             } else if (this.isBindName(name)) {//@click
                 let [, eventName] = name.split(':')
-                console.log(eventName);
                 compileType['bind'](node, value, this.vm, eventName)
                 node.removeAttribute(':' + eventName)
             }
@@ -145,9 +175,97 @@ class myVue {
         this.$options = options
         if (this.$el) {
             //1 实现一个数据观察者
+            new Observer(this.$data)
             //2 实现指令解析器
             new Compile(this.$el, this)
+            this.proxyData(this.$data)
         }
     }
+    //this代理
+    proxyData(data) {
+        for (const key in data) {
+            Object.defineProperty(this, key, {
+                get() {
+                    return data[key]
+                },
+                set(newVal) {
+                    data[key] = newVal
+                }
+            })
+        }
+    }
+}
+class Observer {
+    constructor(data) {
+        this.observe(data)
+    }
+    observe(data) {
+        if (data && typeof data === "object") {
+            Object.keys(data).forEach(key => {
+                this.defineReactive(data, key, data[key])
+            })
+        }
+    }
+    defineReactive(obj, key, value) {
+        //递归遍历
 
+        this.observe(value)
+        //创建监视器 Dep
+        const dep = new Dep()
+        //劫持并监听所有的属性
+        Object.defineProperty(obj, key, {
+            enumerable: true,
+            configurable: false,
+            get() {
+                //初始化的时候
+                //订阅数组变化时，往Dep中添加观察者
+                Dep.target && dep.addSub(Dep.target)
+                return value
+            },
+            set: (newVal) => {
+                this.observe(newVal)
+                if (newVal !== value) {
+                    value = newVal
+                    //通知Dep的变化
+                    dep.notify()
+                }
+
+            }
+        })
+    }
+}
+class Watcher {
+    constructor(vm, content, callback) {
+        this.vm = vm
+        this.content = content
+        this.callback = callback
+        //先保存好原值
+        this.oldVal = this.getOldVal()
+    }
+    getOldVal() {
+        Dep.target = this;
+        let result = compileType.getValue(this.content, this.vm)
+        Dep.target = null;
+        return result
+    }
+    update() {
+        const NewVal = compileType.getValue(this.content, this.vm)
+        if (NewVal != this.oldVal) {
+            this.callback(NewVal)
+        }
+    }
+}
+class Dep {//1 通知 2收集 watcher
+    constructor() {
+        this.subs = []
+    }
+    addSub(watcher) {//添加观察者
+        this.subs.push(watcher)
+    }
+    notify() {//通知观察者更新
+        console.log("通知了观察者", this.subs);
+        this.subs.forEach(watcher => {
+            watcher.update()
+        })
+    }
 }
